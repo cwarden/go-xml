@@ -190,6 +190,7 @@ func TestAddAttributeWithTypingCarriesEveryProperty(t *testing.T) {
 		IsIDREFS:         true,
 		IsNilled:         true,
 		NoTypedValue:     true,
+		TypedValue:       xdm.NewTypedValue(xdm.NewString("v")),
 	}
 	name := xdm.QName{Local: "a"}
 

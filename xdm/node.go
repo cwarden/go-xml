@@ -88,6 +88,10 @@ func (n *Node) StringValue() string {
 // Atomize returns the typed value of a node. Without schema validation every
 // node atomises to xs:untypedAtomic, which is what makes untyped comparison
 // rules apply throughout a schemaless transform.
+//
+// A typed value supplied with Typing.TypedValue is returned when it is one
+// item. One of any other length is a sequence, which only AtomizeList and the
+// package-level Atomize return.
 func (n *Node) Atomize() *Atomic {
 	// A comment, processing instruction or namespace node has xs:string for
 	// its typed value, not xs:untypedAtomic. XPath 2.0 appendix I.2 says so
@@ -100,6 +104,10 @@ func (n *Node) Atomize() *Atomic {
 	switch n.Kind() {
 	case KindComment, KindPI, KindNamespace:
 		return NewString(n.StringValue())
+	}
+
+	if v := n.suppliedValue(); v != nil && v.Len() == 1 {
+		return v.items[0]
 	}
 
 	// A node validated against a schema atomises as its annotated type;
@@ -176,7 +184,15 @@ func (n *Node) Atomize() *Atomic {
 // The empty string atomizes to the empty sequence rather than to one
 // zero-length token, which is what "a list of no items" means and what
 // strings.Fields already produces.
+//
+// A typed value supplied with Typing.TypedValue is returned as it is, with
+// true, whatever its length and whatever the string value holds: it is not
+// split into tokens.
 func (n *Node) AtomizeList() (Sequence, bool) {
+	if v := n.suppliedValue(); v != nil {
+		return v.Items(), true
+	}
+
 	// The node's own record wins over the registry, which is keyed by QName
 	// alone and holds whatever schema loaded last -- see Node.ListItem. A
 	// node that carries no record falls back to the walk, so a node annotated
@@ -844,6 +860,9 @@ func annotationIDKind(annotation string) (isID, isIDREFS bool) {
 // data model's properties describe how the node was validated originally and
 // XSLT's stripping rules are the only thing entitled to change them — and
 // those rules say the properties do not change at all.
+//
+// A typed value supplied with Typing.TypedValue is cleared: it was given
+// together with the annotation it replaces.
 func (n *Node) SetTypeAnnotation(annotation string) {
 	if annotation == "" && n.flags&fTyped == 0 {
 		return
@@ -851,6 +870,7 @@ func (n *Node) SetTypeAnnotation(annotation string) {
 	t := n.ownTyping()
 	v := *t.get()
 	v.annotation = annotation
+	v.value = nil
 	if annotation == "" {
 		// Clearing the annotation clears what it meant. DerivedPrimitive and
 		// ListItem describe a type this node no longer claims, and leaving
@@ -900,10 +920,12 @@ func (n *Node) SetTypeAnnotationResolved(annotation, derivedPrimitive, listItem 
 // SetAssessedTyping is SetTypeAnnotationResolved followed by SetTypeEnv, and
 // turns NoTypedValue and MixedContent on when asked, in one write: the shape
 // in which schema assessment annotates a node. annotation must not be "".
+// Like SetTypeAnnotation it clears a supplied typed value.
 func (n *Node) SetAssessedTyping(annotation, derivedPrimitive, listItem string,
 	env *TypeEnvironment, noTypedValue, mixedContent bool) {
 	t := n.ownTyping()
-	setNames(t, typingNames{annotation, t.get().unionMember, derivedPrimitive, listItem, env})
+	setNames(t, typingNames{annotation: annotation, unionMember: t.get().unionMember,
+		derivedPrimitive: derivedPrimitive, listItem: listItem, env: env})
 	if isID, isRefs := annotationIDKind(annotation); isID || isRefs {
 		t.isID = t.isID || isID
 		t.isIDREFS = t.isIDREFS || isRefs
@@ -918,7 +940,8 @@ func (n *Node) SetAssessedTyping(annotation, derivedPrimitive, listItem string,
 // It exists because there is no such thing as "the important half" of a node's
 // typing. Nine properties record what an assessment concluded --
 // TypeAnnotation, UnionMember, DerivedPrimitive, ListItem, IsID, IsIDREFS,
-// IsNilled, NoTypedValue, MixedContent -- and each one of them has, at some point in this repository, been
+// IsNilled, NoTypedValue, MixedContent -- and a tenth, TypedValue, holds a
+// typed value the program that built the node supplied. Each of the nine has, at some point in this repository, been
 // dropped by a copy site that hand-picked the fields it thought mattered. Each
 // omission was silent and each produced a confidently wrong answer rather than
 // a missing one: a union-typed value atomising to xs:untypedAtomic, fn:id
@@ -939,7 +962,7 @@ func (n *Node) SetAssessedTyping(annotation, derivedPrimitive, listItem string,
 // is-idrefs ON, which would make a copy of a non-ID node inherit a marking the
 // original does not have. The invariant SetTypeAnnotation protects is upheld
 // here by construction: the resolved fields cannot outlive their annotation,
-// because src is a coherent node and all nine fields travel together.
+// because src is a coherent node and all ten fields travel together.
 func (n *Node) CopyTypingFrom(src *Node) { n.ApplyTyping(TypingOf(src)) }
 
 // Typing is the complete set of PSVI properties an assessment concludes about
@@ -954,7 +977,7 @@ func (n *Node) CopyTypingFrom(src *Node) { n.ApplyTyping(TypingOf(src)) }
 // validated this node. The validator holds the right schema at the right
 // moment; Typing is the shape that lets it say so.
 //
-// The field list is CopyTypingFrom's, and deliberately the same one: nine
+// The field list is CopyTypingFrom's, and deliberately the same one: ten
 // properties travel together or the copy is wrong, and every historical bug in
 // this area was a hand-picked subset of them. A new PSVI property must be
 // added here, to CopyTypingFrom and to CopyTypingStrippedFrom together.
@@ -972,6 +995,12 @@ type Typing struct {
 	IsNilled         bool
 	NoTypedValue     bool
 	MixedContent     bool
+	// TypedValue is the node's typed value when the program that built the
+	// node supplies it instead of letting it be derived from the string value
+	// and TypeAnnotation; nil otherwise. It is read only together with a
+	// TypeAnnotation, and atomization returns it unchanged. Schema assessment
+	// never sets it. See TypedValue.
+	TypedValue *TypedValue
 }
 
 // TypingOf reads a node's PSVI properties out as a Typing. A nil node has none.
@@ -986,6 +1015,7 @@ func TypingOf(n *Node) Typing {
 		UnionMember:      nm.unionMember,
 		DerivedPrimitive: nm.derivedPrimitive,
 		ListItem:         nm.listItem,
+		TypedValue:       nm.value,
 		IsID:             t.isID,
 		IsIDREFS:         t.isIDREFS,
 		IsNilled:         t.isNilled,
@@ -1008,7 +1038,9 @@ func (n *Node) ApplyTyping(t Typing) {
 		return
 	}
 	d := n.ownTyping()
-	setNames(d, typingNames{t.TypeAnnotation, t.UnionMember, t.DerivedPrimitive, t.ListItem, d.get().env})
+	setNames(d, typingNames{annotation: t.TypeAnnotation, unionMember: t.UnionMember,
+		derivedPrimitive: t.DerivedPrimitive, listItem: t.ListItem, env: d.get().env,
+		value: t.TypedValue})
 	d.isID = t.IsID
 	d.isIDREFS = t.IsIDREFS
 	d.isNilled = t.IsNilled
@@ -1030,6 +1062,10 @@ func (n *Node) ApplyTyping(t Typing) {
 //     gates on TypeAnnotation != "", so a surviving ListItem would go unread
 //     until something else re-annotated the node, and then describe a type the
 //     node no longer claims. The four go together in both directions.
+//
+//   - TypedValue is CLEARED with them. It is the value the type gives the
+//     node, and a stripped node's typed value is its string value as
+//     xs:untypedAtomic.
 //
 //   - IsID and IsIDREFS are KEPT. Section 3.5 says so in as many words: the
 //     setting "does not change the is-id and is-idrefs properties". They are

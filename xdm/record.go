@@ -288,10 +288,15 @@ type nodeTyping struct {
 	isID, isIDREFS, isNilled, noTypedValue, mixedContent bool
 }
 
-// typingNames is the part of a node's typing that names types.
+// typingNames is the part of a node's typing that names types, and the
+// typed value a program gave the node (Typing.TypedValue).
 type typingNames struct {
 	annotation, unionMember, derivedPrimitive, listItem string
 	env                                                 *TypeEnvironment
+	// value is nil unless the program that built the node supplied its
+	// typed value. It is per node rather than per type, so names holding
+	// one are not shared through recentNames (see setNames).
+	value *TypedValue
 }
 
 var zeroNames typingNames
@@ -1144,6 +1149,15 @@ func setNames(t *nodeTyping, v typingNames) {
 		return
 	}
 	if t.names != nil && *t.names == v {
+		return
+	}
+	if v.value != nil {
+		// A supplied typed value belongs to one node and the copies made of
+		// it, so a cache slot would hold it for no other node to reuse and
+		// push out a set of names that schema-typed nodes do share.
+		p := new(typingNames)
+		*p = v
+		t.names = p
 		return
 	}
 	i := recentSlots(&v)

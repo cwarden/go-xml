@@ -4,6 +4,14 @@ Notable changes, newest first. Versions follow [semantic
 versioning](https://semver.org): from 1.0.0 the exported API is stable, and a
 breaking change means 2.0 with a new module path. See *Stability* below.
 
+## Unreleased
+
+### Added
+
+| Change | What it does | Commit |
+|---|---|---|
+| `xdm.Typing.TypedValue`, `xdm.TypedValue`, `xdm.NewTypedValue` | A program that builds a tree can give a node its typed value instead of having it derived from the string value and the annotation: an attribute whose string value is `[a, b c]` atomizes to the two strings `a` and `b c`. Copies keep it; stripping and a new annotation clear it. | |
+
 ## v2.3.1 — 2026-11-13
 
 ### Fixed

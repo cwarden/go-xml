@@ -22,6 +22,7 @@ var psviProperties = map[string]bool{
 	"isNilled":         true,
 	"noTypedValue":     true,
 	"mixedContent":     true,
+	"value":            true,
 }
 
 var nonPSVIProperties = map[string]string{
@@ -124,7 +125,8 @@ func TestCopyTypingStrippedFromTouchesEveryPSVIProperty(t *testing.T) {
 	// cleared nor the kept answer.
 	dst := NewNode(KindElement, QName{}, "")
 	dst.ApplyTyping(Typing{TypeAnnotation: "stale", UnionMember: "stale",
-		DerivedPrimitive: "stale", ListItem: "stale", IsNilled: true})
+		DerivedPrimitive: "stale", ListItem: "stale", IsNilled: true,
+		TypedValue: NewTypedValue(NewString("stale"))})
 	dst.CopyTypingStrippedFrom(src)
 
 	// XSLT 2.0 3.5: the four naming the type go, is-id and is-idrefs stay,
@@ -135,6 +137,10 @@ func TestCopyTypingStrippedFromTouchesEveryPSVIProperty(t *testing.T) {
 			"UnionMember=%q DerivedPrimitive=%q ListItem=%q",
 			dst.TypeAnnotation(), dst.UnionMember(), dst.DerivedPrimitive(),
 			dst.ListItem())
+	}
+	if TypingOf(dst).TypedValue != nil {
+		t.Error("stripping kept the supplied typed value, which belongs to " +
+			"the type that stripping removes")
 	}
 	if !dst.IsID() || !dst.IsIDREFS() {
 		t.Errorf("stripping dropped is-id/is-idrefs, which 3.5 exempts: "+
@@ -152,7 +158,8 @@ func TestCopyTypingStrippedFromTouchesEveryPSVIProperty(t *testing.T) {
 func setEveryPSVIProperty(n *Node) {
 	n.ApplyTyping(Typing{TypeAnnotation: "{urn:census}T", UnionMember: "{urn:census}M",
 		DerivedPrimitive: "decimal", ListItem: "decimal", IsID: true, IsIDREFS: true,
-		IsNilled: true, NoTypedValue: true, MixedContent: true})
+		IsNilled: true, NoTypedValue: true, MixedContent: true,
+		TypedValue: NewTypedValue(NewString("census"))})
 }
 
 // TestTypingNamesAreShared pins that nodes typed alike share one set of names
